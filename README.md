@@ -103,5 +103,4 @@ Structuring scalable projects
 
 👩‍💻 Author
 Salma ALAOUI MRANI
-Master Big Data & Business Intelligence
-Université Sorbonne Paris Nord
+
