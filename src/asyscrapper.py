@@ -74,7 +74,7 @@ async def fetch_page(session, category, page, page_size, sem):
 # -------------------------
 # Async image download
 # -------------------------
-async def download_image(session, url, image_id, sem, folder="data/images/sugar"):
+async def download_image(session, url, image_id, sem, folder = f"data/raw/images/{CATEGORY}"):
     if not url:
         return
 
