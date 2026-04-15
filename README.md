@@ -80,7 +80,7 @@ data/raw/metadata_milk_180.csv
 
 ---
 
-##📊 Dataset
+📊 Dataset
 
 Example categories:
 sugar
@@ -93,7 +93,7 @@ metadata (CSV)
 
 ---
 
-##🧠 Key Learnings
+🧠 Key Learnings
 Modular data pipeline design
 Data vs code versioning (Git vs DVC)
 Handling real-world API limitations
@@ -101,7 +101,7 @@ Structuring scalable projects
 
 ---
 
-###👩‍💻 Author
+👩‍💻 Author
 Salma ALAOUI MRANI
 Master Big Data & Business Intelligence
 Université Sorbonne Paris Nord
