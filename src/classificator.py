@@ -16,11 +16,14 @@ from torchvision.models import resnet18
 from torch.utils.data import DataLoader, random_split
 
 import matplotlib.pyplot as plt
+plt.ioff()  # Disable interactive mode to prevent hanging
 from sklearn.metrics import (
     classification_report,
     confusion_matrix,
     roc_curve,
-    auc
+    auc,
+    precision_recall_curve,
+    average_precision_score
 )
 from sklearn.preprocessing import label_binarize
 from sklearn.manifold import TSNE
@@ -33,6 +36,14 @@ try:
 except ImportError:
     print("UMAP not installed — skipping UMAP visualization.")
     umap_available = False
+
+import argparse
+
+
+# --- Create visualizations folder ---
+VISUALIZATIONS_DIR = "visualizations"
+os.makedirs(VISUALIZATIONS_DIR, exist_ok=True)
+print(f"Visualizations will be saved to: {VISUALIZATIONS_DIR}/")
 
 
 # --- Seed pour reproductibilité ---
@@ -52,6 +63,10 @@ def set_seed(seed=42):
 
 
 set_seed(42)
+
+parser = argparse.ArgumentParser(description="Train or infer with ResNet18 classifier")
+parser.add_argument('--infer', type=str, help='Path to image for inference')
+args = parser.parse_args()
 
 # --- Constantes globales ---
 H = 256
@@ -135,6 +150,45 @@ print(f"Train: {len(train_dataset)}, "
       f"Val: {len(val_dataset)}, Test: {len(test_dataset)}")
 
 
+# --- Data Distribution Visualization ---
+def plot_data_distribution(datasets, names, classes):
+    """
+    Plots the class distribution across different datasets.
+
+    Parameters
+    ----------
+    datasets : list
+        List of datasets (train, val, test).
+    names : list
+        Names for each dataset.
+    classes : list
+        Class names.
+    """
+    plt.figure(figsize=(15, 5))
+
+    for i, (dataset, name) in enumerate(zip(datasets, names)):
+        class_counts = {}
+        for _, label in dataset:
+            class_name = classes[label]
+            class_counts[class_name] = class_counts.get(class_name, 0) + 1
+
+        plt.subplot(1, 3, i + 1)
+        plt.bar(class_counts.keys(), class_counts.values())
+        plt.title(f'{name} Set Distribution')
+        plt.ylabel('Number of Samples')
+        plt.xticks(rotation=45)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'data_distribution.png'), dpi=300, bbox_inches='tight')
+
+
+plot_data_distribution(
+    [train_dataset, val_dataset, test_dataset],
+    ['Train', 'Validation', 'Test'],
+    train_dataset.classes
+)
+
+
 # --- Modèle ResNet18 ---
 def create_resnet18(num_classes):
     """
@@ -161,6 +215,62 @@ def create_resnet18(num_classes):
         nn.Linear(in_features, num_classes)
     )
     return model
+
+
+def infer_image(image_path):
+    """
+    Runs inference on a single image and prints the prediction with confidence and top-3 classes.
+    
+    Parameters
+    ----------
+    image_path : str
+        Path to the input image.
+    """
+    import os
+    if not os.path.exists(image_path):
+        print(f"Error: Image file '{image_path}' not found.")
+        return
+    
+    try:
+        from PIL import Image
+        
+        # Use CPU for inference to avoid CUDA issues
+        device = torch.device('cpu')
+        
+        # Load the trained model
+        model = create_resnet18(NUM_CLASSES).to(device)
+        model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
+        model.eval()
+        
+        # Preprocess the image
+        image = Image.open(image_path).convert('RGB')
+        image_tensor = test_transform(image).unsqueeze(0).to(device)
+        
+        # Run inference
+        with torch.no_grad():
+            outputs = model(image_tensor)
+            probs = torch.softmax(outputs, dim=1).cpu().numpy()[0]
+            pred_idx = torch.argmax(outputs, dim=1).item()
+        
+        # Get top 3 predictions
+        top3_indices = np.argsort(probs)[::-1][:3]
+        top3_classes = [train_dataset.classes[i] for i in top3_indices]
+        top3_probs = [probs[i] for i in top3_indices]
+        
+        # Print results
+        print(f"Predicted category: {train_dataset.classes[pred_idx]} (confidence: {probs[pred_idx]:.2f})")
+        print("Top 3 predictions:")
+        for cls, prob in zip(top3_classes, top3_probs):
+            print(f"  {cls}: {prob:.2f}")
+    except Exception as e:
+        print(f"Error during inference: {e}")
+        return
+
+
+# Check if inference mode
+if args.infer:
+    infer_image(args.infer)
+    exit()
 
 
 # --- Device ---
@@ -227,6 +337,7 @@ def mixup_data(x, y, alpha=0.4):
 train_losses = []
 val_losses = []
 val_accuracies = []
+learning_rates = []
 
 best_val_loss = float("inf")
 best_val_acc = 0.0
@@ -285,6 +396,7 @@ for epoch in range(NUM_EPOCHS):
     train_losses.append(avg_train_loss)
     val_losses.append(avg_val_loss)
     val_accuracies.append(val_acc)
+    learning_rates.append(optimizer.param_groups[0]['lr'])
 
     print(
         f"Epoch {epoch + 1}/{NUM_EPOCHS} — "
@@ -321,7 +433,7 @@ plt.xlabel("Epoch")
 plt.ylabel("Loss")
 plt.title("Training & Validation Loss (ResNet18 full FT + MixUp)")
 plt.legend()
-plt.show()
+plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'training_validation_loss.png'), dpi=300, bbox_inches='tight')
 
 plt.figure(figsize=(8, 5))
 plt.plot(val_accuracies, label="Validation Accuracy")
@@ -329,11 +441,19 @@ plt.xlabel("Epoch")
 plt.ylabel("Accuracy")
 plt.title("Validation Accuracy (ResNet18 full FT + MixUp)")
 plt.legend()
-plt.show()
+plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'validation_accuracy.png'), dpi=300, bbox_inches='tight')
+
+plt.figure(figsize=(8, 5))
+plt.plot(learning_rates, label="Learning Rate")
+plt.xlabel("Epoch")
+plt.ylabel("Learning Rate")
+plt.title("Learning Rate Schedule (Cosine Annealing)")
+plt.legend()
+plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'learning_rate_schedule.png'), dpi=300, bbox_inches='tight')
 
 
 # --- Évaluation sur le test ---
-model.load_state_dict(torch.load("best_model_resnet18_finetuned.pth"))
+model.load_state_dict(torch.load(MODEL_PATH))
 model.eval()
 
 all_preds = []
@@ -388,8 +508,68 @@ def evaluate_model(model, loader):
 
 all_preds, all_labels, all_probs = evaluate_model(model, test_loader)
 
-# --- Rapport de classification ---
-print(classification_report(all_labels, all_preds, target_names=dataset.classes))
+
+# --- Comprehensive Metrics Summary ---
+def plot_metrics_summary(labels, preds, classes):
+    """
+    Creates a comprehensive metrics summary plot.
+
+    Parameters
+    ----------
+    labels : np.ndarray
+        Ground-truth labels.
+    preds : np.ndarray
+        Predicted labels.
+    classes : list of str
+        Class names.
+    """
+    from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
+
+    accuracy = accuracy_score(labels, preds)
+    precision = precision_score(labels, preds, average='weighted')
+    recall = recall_score(labels, preds, average='weighted')
+    f1 = f1_score(labels, preds, average='weighted')
+
+    metrics = ['Accuracy', 'Precision', 'Recall', 'F1-Score']
+    values = [accuracy, precision, recall, f1]
+
+    plt.figure(figsize=(10, 6))
+    bars = plt.bar(metrics, values, color=['skyblue', 'lightgreen', 'lightcoral', 'gold'])
+    plt.ylabel('Score')
+    plt.title('Model Performance Metrics Summary')
+    plt.ylim(0, 1)
+
+    for bar, value in zip(bars, values):
+        plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                f'{value:.3f}', ha='center', va='bottom')
+
+    plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'metrics_summary.png'), dpi=300, bbox_inches='tight')
+    plt.show()
+
+    # Per-class metrics
+    precision_per_class = precision_score(labels, preds, average=None)
+    recall_per_class = recall_score(labels, preds, average=None)
+    f1_per_class = f1_score(labels, preds, average=None)
+
+    x = np.arange(len(classes))
+    width = 0.25
+
+    plt.figure(figsize=(12, 6))
+    plt.bar(x - width, precision_per_class, width, label='Precision', alpha=0.8)
+    plt.bar(x, recall_per_class, width, label='Recall', alpha=0.8)
+    plt.bar(x + width, f1_per_class, width, label='F1-Score', alpha=0.8)
+
+    plt.xlabel('Classes')
+    plt.ylabel('Score')
+    plt.title('Per-Class Performance Metrics')
+    plt.xticks(x, classes, rotation=45)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'per_class_metrics.png'), dpi=300, bbox_inches='tight')
+    plt.show()
+
+
+plot_metrics_summary(all_labels, all_preds, dataset.classes)
 
 
 # --- Confusion Matrix ---
@@ -416,11 +596,41 @@ def plot_confusion_matrix(cm, classes):
     plt.xlabel("Predicted")
     plt.ylabel("True")
     plt.title("Confusion Matrix (ResNet18 full FT + MixUp)")
-    plt.show()
+    plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'confusion_matrix.png'), dpi=300, bbox_inches='tight')
 
 
 cm = confusion_matrix(all_labels, all_preds)
 plot_confusion_matrix(cm, dataset.classes)
+
+
+# --- Correlation Matrix of Prediction Probabilities ---
+def plot_prediction_correlation(probs, classes):
+    """
+    Plots a correlation matrix of prediction probabilities across classes.
+
+    Parameters
+    ----------
+    probs : np.ndarray
+        Prediction probabilities.
+    classes : list of str
+        Class names.
+    """
+    corr_matrix = np.corrcoef(probs.T)
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(
+        corr_matrix,
+        annot=True,
+        fmt=".2f",
+        xticklabels=classes,
+        yticklabels=classes,
+        cmap="coolwarm",
+        vmin=-1, vmax=1
+    )
+    plt.title("Correlation Matrix of Prediction Probabilities")
+    plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'prediction_correlation.png'), dpi=300, bbox_inches='tight')
+
+
+plot_prediction_correlation(all_probs, dataset.classes)
 
 
 # --- Per-class accuracy ---
@@ -472,7 +682,52 @@ plt.bar(dataset.classes, per_class_acc)
 plt.ylabel("Accuracy")
 plt.title("Per-class Accuracy (ResNet18 full FT + MixUp)")
 plt.xticks(rotation=45)
-plt.show()
+plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'per_class_accuracy.png'), dpi=300, bbox_inches='tight')
+
+
+# --- Prediction Confidence Distribution ---
+def plot_confidence_distribution(probs, preds, labels, classes):
+    """
+    Plots histograms of prediction confidence for correct and incorrect predictions.
+
+    Parameters
+    ----------
+    probs : np.ndarray
+        Softmax probabilities.
+    preds : np.ndarray
+        Predicted class indices.
+    labels : np.ndarray
+        Ground-truth labels.
+    classes : list of str
+        Class names.
+    """
+    max_probs = np.max(probs, axis=1)
+    correct = (preds == labels)
+
+    plt.figure(figsize=(12, 5))
+
+    plt.subplot(1, 2, 1)
+    plt.hist(max_probs[correct], bins=20, alpha=0.7, label="Correct", color="green")
+    plt.hist(max_probs[~correct], bins=20, alpha=0.7, label="Incorrect", color="red")
+    plt.xlabel("Prediction Confidence")
+    plt.ylabel("Count")
+    plt.title("Prediction Confidence Distribution")
+    plt.legend()
+
+    plt.subplot(1, 2, 2)
+    for i, cls in enumerate(classes):
+        cls_probs = max_probs[labels == i]
+        plt.hist(cls_probs, bins=15, alpha=0.5, label=cls)
+
+    plt.xlabel("Prediction Confidence")
+    plt.ylabel("Count")
+    plt.title("Confidence by True Class")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'confidence_distribution.png'), dpi=300, bbox_inches='tight')
+
+
+plot_confidence_distribution(all_probs, all_preds, all_labels, dataset.classes)
 
 
 # --- ROC curves (One-vs-Rest) ---
@@ -502,10 +757,44 @@ def plot_roc_curves(labels, probs, classes):
     plt.ylabel("True Positive Rate")
     plt.title("ROC Curves (ResNet18 full FT + MixUp)")
     plt.legend()
+    plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'roc_curves.png'), dpi=300, bbox_inches='tight')
     plt.show()
 
 
 plot_roc_curves(all_labels, all_probs, dataset.classes)
+
+
+# --- Precision-Recall curves (One-vs-Rest) ---
+def plot_precision_recall_curves(labels, probs, classes):
+    """
+    Plots Precision-Recall curves for each class (one-vs-rest).
+
+    Parameters
+    ----------
+    labels : np.ndarray
+        Ground‑truth labels.
+    probs : np.ndarray
+        Softmax probabilities.
+    classes : list of str
+        Class names.
+    """
+    y_bin = label_binarize(labels, classes=list(range(len(classes))))
+
+    plt.figure(figsize=(10, 8))
+    for i, cls in enumerate(classes):
+        precision, recall, _ = precision_recall_curve(y_bin[:, i], probs[:, i])
+        avg_precision = average_precision_score(y_bin[:, i], probs[:, i])
+        plt.plot(recall, precision, label=f"{cls} (AP={avg_precision:.2f})")
+
+    plt.xlabel("Recall")
+    plt.ylabel("Precision")
+    plt.title("Precision-Recall Curves (ResNet18 full FT + MixUp)")
+    plt.legend()
+    plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'precision_recall_curves.png'), dpi=300, bbox_inches='tight')
+    plt.show()
+
+
+plot_precision_recall_curves(all_labels, all_probs, dataset.classes)
 
 
 # --- Hardest samples ---
@@ -574,10 +863,82 @@ def compute_hardest_samples(model, loader, classes, top_k=12):
         plt.axis("off")
 
     plt.suptitle("Top Hardest Samples (Highest Loss)")
+    plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'hardest_samples.png'), dpi=300, bbox_inches='tight')
     plt.show()
 
 
 compute_hardest_samples(model, test_loader, dataset.classes)
+
+
+# --- Sample Predictions Visualization ---
+def visualize_sample_predictions(model, loader, classes, num_samples=12):
+    """
+    Displays sample predictions with images and confidence scores.
+
+    Parameters
+    ----------
+    model : torch.nn.Module
+        Trained model.
+    loader : DataLoader
+        Test dataloader.
+    classes : list of str
+        Class names.
+    num_samples : int, optional
+        Number of samples to display.
+    """
+    model.eval()
+    images_list = []
+    labels_list = []
+    preds_list = []
+    probs_list = []
+
+    with torch.no_grad():
+        for images, labels in loader:
+            images = images.to(device)
+            labels = labels.to(device)
+
+            outputs = model(images)
+            probs = torch.softmax(outputs, dim=1)
+            _, preds = torch.max(outputs, 1)
+
+            images_list.extend(images.cpu())
+            labels_list.extend(labels.cpu().numpy())
+            preds_list.extend(preds.cpu().numpy())
+            probs_list.extend(probs.cpu().numpy())
+
+            if len(images_list) >= num_samples:
+                break
+
+    plt.figure(figsize=(15, 10))
+    for i in range(min(num_samples, len(images_list))):
+        img = images_list[i].permute(1, 2, 0).numpy()
+        img = (
+            img * np.array([0.229, 0.224, 0.225])
+            + np.array([0.485, 0.456, 0.406])
+        ).clip(0, 1)
+
+        plt.subplot(3, 4, i + 1)
+        plt.imshow(img)
+
+        true_class = classes[labels_list[i]]
+        pred_class = classes[preds_list[i]]
+        confidence = probs_list[i][preds_list[i]]
+
+        color = "green" if labels_list[i] == preds_list[i] else "red"
+        plt.title(
+            f"True: {true_class}\nPred: {pred_class}\nConf: {confidence:.2f}",
+            color=color,
+            fontsize=9
+        )
+        plt.axis("off")
+
+    plt.suptitle("Sample Predictions with Confidence Scores")
+    plt.tight_layout()
+    plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'sample_predictions.png'), dpi=300, bbox_inches='tight')
+    plt.show()
+
+
+visualize_sample_predictions(model, test_loader, dataset.classes)
 
 
 # --- Embeddings t-SNE & UMAP ---
@@ -638,6 +999,7 @@ for i, cls in enumerate(dataset.classes):
 
 plt.legend()
 plt.title("t-SNE Embedding Visualization")
+plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'tsne_embeddings.png'), dpi=300, bbox_inches='tight')
 plt.show()
 
 
@@ -653,4 +1015,40 @@ if umap_available:
 
     plt.legend()
     plt.title("UMAP Embedding Visualization")
+    plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'umap_embeddings.png'), dpi=300, bbox_inches='tight')
     plt.show()
+
+
+# --- Summary of saved visualizations ---
+print("\n" + "="*60)
+print("VISUALIZATION SUMMARY")
+print("="*60)
+print(f"All visualizations have been saved to: {VISUALIZATIONS_DIR}/")
+print("\nSaved files:")
+visualization_files = [
+    "data_distribution.png",
+    "training_validation_loss.png",
+    "validation_accuracy.png",
+    "learning_rate_schedule.png",
+    "metrics_summary.png",
+    "per_class_metrics.png",
+    "confusion_matrix.png",
+    "per_class_accuracy.png",
+    "confidence_distribution.png",
+    "roc_curves.png",
+    "precision_recall_curves.png",
+    "hardest_samples.png",
+    "sample_predictions.png",
+    "tsne_embeddings.png",
+    "umap_embeddings.png"
+]
+
+for i, filename in enumerate(visualization_files, 1):
+    filepath = os.path.join(VISUALIZATIONS_DIR, filename)
+    if os.path.exists(filepath):
+        print(f"{i:2d}. ✓ {filename}")
+    else:
+        print(f"{i:2d}. ✗ {filename} (not found)")
+
+print(f"\nTotal visualizations: {len(visualization_files)}")
+print("="*60)
