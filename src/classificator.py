@@ -13,7 +13,7 @@ import torch.optim as optim
 
 from torchvision import datasets, transforms
 from torchvision.models import resnet18
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader
 
 import matplotlib.pyplot as plt
 plt.ioff()  # Disable interactive mode to prevent hanging
@@ -74,7 +74,7 @@ W = 256
 BATCH_SIZE = 32
 DATA_DIR = "data/processed"
 MODEL_DIR = "models"
-MODEL_PATH = "models/best_model_resnet18_finetuned.pth"
+MODEL_PATH = os.path.join(MODEL_DIR, "best_model_resnet18_finetuned.pth")
 NUM_EPOCHS = 20
 PATIENCE = 3
 
@@ -131,7 +131,8 @@ test_dataset = datasets.ImageFolder(
 )
 
 NUM_CLASSES = len(train_dataset.classes)
-print("Catégories détectées :", train_dataset.classes)
+CLASSES = train_dataset.classes
+print("Catégories détectées :", CLASSES)
 
 # Ensure classes are the same
 assert train_dataset.classes == val_dataset.classes == test_dataset.classes
@@ -151,13 +152,13 @@ print(f"Train: {len(train_dataset)}, "
 
 
 # --- Data Distribution Visualization ---
-def plot_data_distribution(datasets, names, classes):
+def plot_data_distribution(datasets_list, names, classes):
     """
     Plots the class distribution across different datasets.
 
     Parameters
     ----------
-    datasets : list
+    datasets_list : list
         List of datasets (train, val, test).
     names : list
         Names for each dataset.
@@ -166,9 +167,9 @@ def plot_data_distribution(datasets, names, classes):
     """
     plt.figure(figsize=(15, 5))
 
-    for i, (dataset, name) in enumerate(zip(datasets, names)):
+    for i, (dataset_obj, name) in enumerate(zip(datasets_list, names)):
         class_counts = {}
-        for _, label in dataset:
+        for _, label in dataset_obj:
             class_name = classes[label]
             class_counts[class_name] = class_counts.get(class_name, 0) + 1
 
@@ -185,7 +186,7 @@ def plot_data_distribution(datasets, names, classes):
 plot_data_distribution(
     [train_dataset, val_dataset, test_dataset],
     ['Train', 'Validation', 'Test'],
-    train_dataset.classes
+    CLASSES
 )
 
 
@@ -254,11 +255,11 @@ def infer_image(image_path):
         
         # Get top 3 predictions
         top3_indices = np.argsort(probs)[::-1][:3]
-        top3_classes = [train_dataset.classes[i] for i in top3_indices]
+        top3_classes = [CLASSES[i] for i in top3_indices]
         top3_probs = [probs[i] for i in top3_indices]
         
         # Print results
-        print(f"Predicted category: {train_dataset.classes[pred_idx]} (confidence: {probs[pred_idx]:.2f})")
+        print(f"Predicted category: {CLASSES[pred_idx]} (confidence: {probs[pred_idx]:.2f})")
         print("Top 3 predictions:")
         for cls, prob in zip(top3_classes, top3_probs):
             print(f"  {cls}: {prob:.2f}")
@@ -410,7 +411,6 @@ for epoch in range(NUM_EPOCHS):
         best_val_acc = val_acc
         patience_counter = 0
 
-        os.makedirs(MODEL_DIR, exist_ok=True)
         torch.save(model.state_dict(), MODEL_PATH)
         print("→ Nouveau meilleur modèle sauvegardé")
     else:
@@ -453,7 +453,8 @@ plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'learning_rate_schedule.png'), dpi=
 
 
 # --- Évaluation sur le test ---
-model.load_state_dict(torch.load(MODEL_PATH))
+model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
+model.to(device)
 model.eval()
 
 all_preds = []
@@ -508,20 +509,14 @@ def evaluate_model(model, loader):
 
 all_preds, all_labels, all_probs = evaluate_model(model, test_loader)
 
+# --- Rapport de classification ---
+print(classification_report(all_labels, all_preds, target_names=CLASSES))
+
 
 # --- Comprehensive Metrics Summary ---
 def plot_metrics_summary(labels, preds, classes):
     """
     Creates a comprehensive metrics summary plot.
-
-    Parameters
-    ----------
-    labels : np.ndarray
-        Ground-truth labels.
-    preds : np.ndarray
-        Predicted labels.
-    classes : list of str
-        Class names.
     """
     from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
 
@@ -541,10 +536,10 @@ def plot_metrics_summary(labels, preds, classes):
 
     for bar, value in zip(bars, values):
         plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
-                f'{value:.3f}', ha='center', va='bottom')
+                 f'{value:.3f}', ha='center', va='bottom')
 
     plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'metrics_summary.png'), dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
     # Per-class metrics
     precision_per_class = precision_score(labels, preds, average=None)
@@ -566,23 +561,16 @@ def plot_metrics_summary(labels, preds, classes):
     plt.legend()
     plt.tight_layout()
     plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'per_class_metrics.png'), dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
 
-plot_metrics_summary(all_labels, all_preds, dataset.classes)
+plot_metrics_summary(all_labels, all_preds, CLASSES)
 
 
 # --- Confusion Matrix ---
 def plot_confusion_matrix(cm, classes):
     """
     Displays a confusion matrix as a heatmap.
-
-    Parameters
-    ----------
-    cm : np.ndarray
-        Confusion matrix.
-    classes : list of str
-        Class names.
     """
     plt.figure(figsize=(10, 8))
     sns.heatmap(
@@ -597,23 +585,17 @@ def plot_confusion_matrix(cm, classes):
     plt.ylabel("True")
     plt.title("Confusion Matrix (ResNet18 full FT + MixUp)")
     plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'confusion_matrix.png'), dpi=300, bbox_inches='tight')
+    plt.close()
 
 
 cm = confusion_matrix(all_labels, all_preds)
-plot_confusion_matrix(cm, dataset.classes)
+plot_confusion_matrix(cm, CLASSES)
 
 
 # --- Correlation Matrix of Prediction Probabilities ---
 def plot_prediction_correlation(probs, classes):
     """
     Plots a correlation matrix of prediction probabilities across classes.
-
-    Parameters
-    ----------
-    probs : np.ndarray
-        Prediction probabilities.
-    classes : list of str
-        Class names.
     """
     corr_matrix = np.corrcoef(probs.T)
     plt.figure(figsize=(10, 8))
@@ -628,29 +610,16 @@ def plot_prediction_correlation(probs, classes):
     )
     plt.title("Correlation Matrix of Prediction Probabilities")
     plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'prediction_correlation.png'), dpi=300, bbox_inches='tight')
+    plt.close()
 
 
-plot_prediction_correlation(all_probs, dataset.classes)
+plot_prediction_correlation(all_probs, CLASSES)
 
 
 # --- Per-class accuracy ---
 def compute_per_class_accuracy(model, loader, num_classes):
     """
     Computes accuracy for each class separately.
-
-    Parameters
-    ----------
-    model : torch.nn.Module
-        Trained model.
-    loader : DataLoader
-        Test dataloader.
-    num_classes : int
-        Number of classes.
-
-    Returns
-    -------
-    np.ndarray
-        Per-class accuracy values.
     """
     correct = np.zeros(num_classes)
     total = np.zeros(num_classes)
@@ -678,37 +647,27 @@ per_class_acc = compute_per_class_accuracy(
 )
 
 plt.figure(figsize=(10, 5))
-plt.bar(dataset.classes, per_class_acc)
+plt.bar(CLASSES, per_class_acc)
 plt.ylabel("Accuracy")
 plt.title("Per-class Accuracy (ResNet18 full FT + MixUp)")
 plt.xticks(rotation=45)
 plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'per_class_accuracy.png'), dpi=300, bbox_inches='tight')
+plt.close()
 
 
 # --- Prediction Confidence Distribution ---
 def plot_confidence_distribution(probs, preds, labels, classes):
     """
     Plots histograms of prediction confidence for correct and incorrect predictions.
-
-    Parameters
-    ----------
-    probs : np.ndarray
-        Softmax probabilities.
-    preds : np.ndarray
-        Predicted class indices.
-    labels : np.ndarray
-        Ground-truth labels.
-    classes : list of str
-        Class names.
     """
     max_probs = np.max(probs, axis=1)
-    correct = (preds == labels)
+    correct_mask = (preds == labels)
 
     plt.figure(figsize=(12, 5))
 
     plt.subplot(1, 2, 1)
-    plt.hist(max_probs[correct], bins=20, alpha=0.7, label="Correct", color="green")
-    plt.hist(max_probs[~correct], bins=20, alpha=0.7, label="Incorrect", color="red")
+    plt.hist(max_probs[correct_mask], bins=20, alpha=0.7, label="Correct", color="green")
+    plt.hist(max_probs[~correct_mask], bins=20, alpha=0.7, label="Incorrect", color="red")
     plt.xlabel("Prediction Confidence")
     plt.ylabel("Count")
     plt.title("Prediction Confidence Distribution")
@@ -725,24 +684,16 @@ def plot_confidence_distribution(probs, preds, labels, classes):
     plt.legend()
     plt.tight_layout()
     plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'confidence_distribution.png'), dpi=300, bbox_inches='tight')
+    plt.close()
 
 
-plot_confidence_distribution(all_probs, all_preds, all_labels, dataset.classes)
+plot_confidence_distribution(all_probs, all_preds, all_labels, CLASSES)
 
 
 # --- ROC curves (One-vs-Rest) ---
 def plot_roc_curves(labels, probs, classes):
     """
     Plots ROC curves for each class (one-vs-rest).
-
-    Parameters
-    ----------
-    labels : np.ndarray
-        Ground‑truth labels.
-    probs : np.ndarray
-        Softmax probabilities.
-    classes : list of str
-        Class names.
     """
     y_bin = label_binarize(labels, classes=list(range(len(classes))))
 
@@ -758,25 +709,16 @@ def plot_roc_curves(labels, probs, classes):
     plt.title("ROC Curves (ResNet18 full FT + MixUp)")
     plt.legend()
     plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'roc_curves.png'), dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
 
-plot_roc_curves(all_labels, all_probs, dataset.classes)
+plot_roc_curves(all_labels, all_probs, CLASSES)
 
 
 # --- Precision-Recall curves (One-vs-Rest) ---
 def plot_precision_recall_curves(labels, probs, classes):
     """
     Plots Precision-Recall curves for each class (one-vs-rest).
-
-    Parameters
-    ----------
-    labels : np.ndarray
-        Ground‑truth labels.
-    probs : np.ndarray
-        Softmax probabilities.
-    classes : list of str
-        Class names.
     """
     y_bin = label_binarize(labels, classes=list(range(len(classes))))
 
@@ -791,31 +733,16 @@ def plot_precision_recall_curves(labels, probs, classes):
     plt.title("Precision-Recall Curves (ResNet18 full FT + MixUp)")
     plt.legend()
     plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'precision_recall_curves.png'), dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
 
-plot_precision_recall_curves(all_labels, all_probs, dataset.classes)
+plot_precision_recall_curves(all_labels, all_probs, CLASSES)
 
 
 # --- Hardest samples ---
 def compute_hardest_samples(model, loader, classes, top_k=12):
     """
     Identifies the samples with the highest loss.
-
-    Parameters
-    ----------
-    model : torch.nn.Module
-        Trained model.
-    loader : DataLoader
-        Test dataloader.
-    classes : list of str
-        Class names.
-    top_k : int, optional
-        Number of hardest samples to display.
-
-    Returns
-    -------
-    None
     """
     criterion_nr = nn.CrossEntropyLoss(reduction="none")
 
@@ -864,27 +791,16 @@ def compute_hardest_samples(model, loader, classes, top_k=12):
 
     plt.suptitle("Top Hardest Samples (Highest Loss)")
     plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'hardest_samples.png'), dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
 
-compute_hardest_samples(model, test_loader, dataset.classes)
+compute_hardest_samples(model, test_loader, CLASSES)
 
 
 # --- Sample Predictions Visualization ---
 def visualize_sample_predictions(model, loader, classes, num_samples=12):
     """
     Displays sample predictions with images and confidence scores.
-
-    Parameters
-    ----------
-    model : torch.nn.Module
-        Trained model.
-    loader : DataLoader
-        Test dataloader.
-    classes : list of str
-        Class names.
-    num_samples : int, optional
-        Number of samples to display.
     """
     model.eval()
     images_list = []
@@ -935,28 +851,16 @@ def visualize_sample_predictions(model, loader, classes, num_samples=12):
     plt.suptitle("Sample Predictions with Confidence Scores")
     plt.tight_layout()
     plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'sample_predictions.png'), dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
 
-visualize_sample_predictions(model, test_loader, dataset.classes)
+visualize_sample_predictions(model, test_loader, CLASSES)
 
 
 # --- Embeddings t-SNE & UMAP ---
 def extract_features(model, x):
     """
     Extracts convolutional features from ResNet‑18 before the classifier.
-
-    Parameters
-    ----------
-    model : torch.nn.Module
-        Trained ResNet‑18.
-    x : torch.Tensor
-        Input batch.
-
-    Returns
-    -------
-    torch.Tensor
-        Flattened feature vectors.
     """
     x = model.conv1(x)
     x = model.bn1(x)
@@ -993,14 +897,14 @@ tsne = TSNE(n_components=2, perplexity=30, learning_rate=200)
 tsne_emb = tsne.fit_transform(embeddings)
 
 plt.figure(figsize=(8, 6))
-for i, cls in enumerate(dataset.classes):
+for i, cls in enumerate(CLASSES):
     idx = labels_list == i
     plt.scatter(tsne_emb[idx, 0], tsne_emb[idx, 1], label=cls, alpha=0.6)
 
 plt.legend()
 plt.title("t-SNE Embedding Visualization")
 plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'tsne_embeddings.png'), dpi=300, bbox_inches='tight')
-plt.show()
+plt.close()
 
 
 # --- UMAP ---
@@ -1009,14 +913,14 @@ if umap_available:
     umap_emb = reducer.fit_transform(embeddings)
 
     plt.figure(figsize=(8, 6))
-    for i, cls in enumerate(dataset.classes):
+    for i, cls in enumerate(CLASSES):
         idx = labels_list == i
         plt.scatter(umap_emb[idx, 0], umap_emb[idx, 1], label=cls, alpha=0.6)
 
     plt.legend()
     plt.title("UMAP Embedding Visualization")
     plt.savefig(os.path.join(VISUALIZATIONS_DIR, 'umap_embeddings.png'), dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
 
 # --- Summary of saved visualizations ---
