@@ -1,42 +1,43 @@
-# Food Product Classification Pipeline
+# 🍎 Food Product Classification Pipeline
 
-A data engineering and machine learning project for classifying food products using images and metadata from the Open Food Facts API.
+> A data engineering and machine learning project for classifying food products using images and metadata from the Open Food Facts API.
 
 ---
 
 ## 📌 Overview
 
-This project implements a complete ML pipeline:
+This project implements an end-to-end pipeline that:
 
-* data ingestion from an external API
-* preprocessing and dataset structuring
-* model training using deep learning
-* evaluation and inference
+* collects product data from an external API
+* processes and structures datasets for machine learning
+* trains a deep learning model for image classification
+* evaluates model performance using multiple metrics
 
-The pipeline follows a standard architecture:
+Pipeline architecture:
 
-**RAW → INTERIM → PROCESSED → TRAINING → INFERENCE**
+```
+RAW → INTERIM → PROCESSED → TRAINING → INFERENCE
+```
 
 ---
 
 ## 🎯 Objectives
 
-* Build a scalable data pipeline
-* Structure datasets for ML workflows
+* Build a modular and scalable data pipeline
+* Structure datasets for reproducible ML workflows
 * Train a classification model on real-world data
-* Ensure reproducibility using DVC
-* Apply best practices in ML engineering
+* Apply best practices in ML engineering and versioning
 
 ---
 
 ## 🧰 Tech Stack
 
-* Python
-* PyTorch & torchvision
-* aiohttp (async scraping)
-* Pandas & NumPy
-* DVC (data & model versioning)
-* Git & GitHub
+* **Python**
+* **PyTorch & torchvision**
+* **aiohttp** (asynchronous data collection)
+* **Pandas & NumPy**
+* **DVC** (data & model versioning)
+* **Git & GitHub**
 
 ---
 
@@ -49,24 +50,24 @@ data/
 ├── processed/
 
 models/
-├── best_model_resnet18_finetuned.pth
+└── best_model_resnet18_finetuned.pth
 
 src/
 ├── asyscrapper.py
 ├── data_processor.py
 ├── data_loader.py
-├── classificator.py
+└── classificator.py
 ```
 
 ---
 
-## ⚙️ Pipeline Steps
+## ⚙️ Pipeline
 
 ### 1. Data Ingestion
 
 * Asynchronous scraping using `aiohttp`
-* Retry logic for API errors (e.g., 503)
-* Image download + metadata storage
+* Retry logic for API errors (e.g. 503)
+* Image download + metadata extraction
 
 ### 2. Data Processing
 
@@ -75,36 +76,52 @@ src/
 
 ### 3. Model Training
 
-* ResNet18 (pretrained on ImageNet)
-* Fine-tuning all layers
-* Data augmentation (MixUp, transforms)
+* ResNet-18 (fine-tuned)
+* Data augmentation (MixUp, transformations)
 * Early stopping
 
 ### 4. Evaluation
 
-* Accuracy, precision, recall, F1-score
-* Confusion matrix and ROC curves
+* Precision, recall, F1-score
+* Confusion matrix
+* ROC curves
 
 ---
 
-## 🤖 Model Details
+## 🤖 Model
 
-* Architecture: ResNet18
-* Classes: bread, butter, champagnes, milk, sugar
-* Input: 256×256 images
-* Optimizer: Adam
-* Scheduler: cosine annealing
+* **Architecture:** ResNet-18
+* **Input:** 256×256 images
+* **Classes:** bread, butter, champagnes, milk, sugar
+* **Validation accuracy:** ~74–90% (depending on run)
 
 ---
 
 ## 🔄 Reproducibility
 
-* Git → code versioning
-* DVC → data and model versioning
+This project separates versioning responsibilities:
+
+* **Git** → source code
+* **DVC** → datasets and trained models
+
+### Setup
+
+```bash
+git clone https://github.com/s123456-ops/ml-translation-pipeline.git
+cd ml-translation-pipeline
+
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+
+dvc pull
+```
 
 ---
 
 ## 🚀 Usage
+
+Run the full pipeline:
 
 ```bash
 python src/asyscrapper.py
@@ -117,18 +134,18 @@ python src/classificator.py
 ## 🧠 Key Learnings
 
 * Designing modular data pipelines
-* Handling unreliable APIs
-* Managing data vs model versioning
-* Applying deep learning to real-world data
+* Handling unreliable external APIs
+* Managing data vs model versioning (Git + DVC)
+* Applying deep learning to real-world datasets
 
 ---
 
 ## 🔬 Future Improvements
 
-* Add more categories
-* Deploy as API (FastAPI)
-* Experiment with other architectures
-* Automate hyperparameter tuning
+* Add more product categories
+* Experiment with alternative architectures
+* Deploy the model as an API
+* Automate training and evaluation
 
 ---
 
