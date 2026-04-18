@@ -170,7 +170,8 @@ def plot_data_distribution(datasets_list, names, classes):
     for i, (dataset_obj, name) in enumerate(zip(datasets_list, names)):
         class_counts = {}
         for _, label in dataset_obj:
-            class_name = classes[label]
+            class_name = 
+            classes[label]
             class_counts[class_name] = class_counts.get(class_name, 0) + 1
 
         plt.subplot(1, 3, i + 1)
